@@ -30,6 +30,7 @@ from launch.actions import DeclareLaunchArgument
 from launch.actions import GroupAction
 from launch.actions import IncludeLaunchDescription
 from launch.actions import OpaqueFunction
+from launch.actions import RegisterEventHandler
 from launch.launch_context import LaunchContext
 from launch.launch_description_entity import LaunchDescriptionEntity
 from launch.launch_description_sources.python_launch_description_source import \
@@ -134,6 +135,10 @@ class LintVerb(VerbExtensionPoint):
             entities = entity.execute(context)
             for e in entities:
                 depends |= self.parse_entity(e, context)
+        elif isinstance(entity, RegisterEventHandler):
+            for tup in entity.describe_conditional_sub_entities():
+                for e in tup[1]:
+                    depends |= self.parse_entity(e, context)
         return depends
 
     def parse_substitutions(self, substitutions: list[Substitution]) -> str:
