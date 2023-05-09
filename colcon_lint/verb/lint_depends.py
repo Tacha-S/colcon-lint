@@ -15,6 +15,7 @@
 import argparse
 import ast
 import pathlib
+import subprocess
 from xml.etree import ElementTree
 
 from colcon_core.command import CommandContext
@@ -87,9 +88,29 @@ class LintVerb(VerbExtensionPoint):
                                 FindPackageShare(package).find(package)
                                 import_depends.add(package)
                             except Exception:
-                                pass
+                                if self.resolve_python_package('python3-' + package):
+                                    import_depends.add('python3-' + package)
+                                if self.resolve_python_package(package + '-pip'):
+                                    import_depends.add(package+ '-pip')
 
-            detected = exec_depends | import_depends
+            setup_py = pkg_path.parents[4] / 'build' / pkg.name / 'setup.py'
+            setup_py_depends = set()
+            if setup_py.exists():
+                with open(setup_py) as f:
+                    text = f.read()
+                    a = ast.parse(text)
+                    for line in a.body:
+                        if hasattr(line, 'value') and isinstance(line.value, ast.Call) and \
+                            line.value.func.id == 'setup':
+                            for keyword in line.value.keywords:
+                                if keyword.arg == 'install_requires':
+                                    for value in keyword.value.elts:
+                                        if self.resolve_python_package('python3-' + value.s):
+                                            setup_py_depends.add('python3-' + value.s)
+                                        if self.resolve_python_package(value.s + '-pip'):
+                                            setup_py_depends.add(value.s + '-pip')
+
+            detected = exec_depends | import_depends | setup_py_depends
             missing = detected - described_exec_depends - described_depends - set([pkg.name])
             unnecessary = described_exec_depends - detected
             if missing:
@@ -98,6 +119,13 @@ class LintVerb(VerbExtensionPoint):
             if unnecessary:
                 logger.warn(f'[{pkg.name}] unnecessary packages: {unnecessary}')
         return rc
+
+    def resolve_python_package(self, package: str) -> bool:
+        rosdep = subprocess.Popen(['rosdep', 'resolve', package],
+                                  stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE)
+        rosdep.wait()
+        return rosdep.returncode == 0
 
     def resolve_depends(self, path: pathlib.Path) -> set:
         depends = set()
