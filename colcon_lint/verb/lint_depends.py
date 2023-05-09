@@ -14,7 +14,6 @@
 
 import argparse
 import ast
-import importlib
 import pathlib
 from xml.etree import ElementTree
 
@@ -72,24 +71,27 @@ class LintVerb(VerbExtensionPoint):
             described_exec_depends = set([dep.text for dep in root.iter('exec_depend')])
             described_depends = set([dep.text for dep in root.iter('depend')])
 
-            python_sources = pkg_path.parents[5] / 'build' / pkg.name / pkg.name
+            python_sources = pkg_path.parents[4] / 'build' / pkg.name / pkg.name
             import_depends = set()
             for file in python_sources.glob('**/*.py'):
                 with open(file) as f:
                     text = f.read()
                     a = ast.parse(text)
                     for line in a.body:
-                        if isinstance(line, ast.Import):
+                        if isinstance(line, (ast.Import, ast.ImportFrom)):
+                            if isinstance(line, ast.Import):
+                                package = line.names[0].name
+                            else:
+                                package = line.module.split('.')[0]
                             try:
-                                if importlib.import_module(line.names[0].name).__path__[0].startswith('/opt/ros'):
-                                    import_depends.add(line.names[0].name)
+                                FindPackageShare(package).find(package)
+                                import_depends.add(package)
                             except Exception:
                                 pass
-                        elif isinstance(line, ast.ImportFrom):
-                            import_depends.add(line.module.split('.')[0])
 
-            missing = exec_depends - described_exec_depends - described_depends - set([pkg.name])
-            unnecessary = described_exec_depends - exec_depends
+            detected = exec_depends | import_depends
+            missing = detected - described_exec_depends - described_depends - set([pkg.name])
+            unnecessary = described_exec_depends - detected
             if missing:
                 logger.warn(f'[{pkg.name}] missing packages: {missing}')
                 rc = 1
