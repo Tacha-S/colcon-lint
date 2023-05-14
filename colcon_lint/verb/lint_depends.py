@@ -40,6 +40,7 @@ from launch.substitutions import TextSubstitution
 from launch_ros.actions import LoadComposableNodes
 from launch_ros.actions import Node
 from launch_ros.descriptions import ComposableNode
+from launch_ros.substitutions import FindPackagePrefix
 from launch_ros.substitutions import FindPackageShare
 
 logger = colcon_logger.getChild(__name__)
@@ -72,43 +73,47 @@ class LintVerb(VerbExtensionPoint):
             described_exec_depends = set([dep.text for dep in root.iter('exec_depend')])
             described_depends = set([dep.text for dep in root.iter('depend')])
 
-            python_sources = pkg_path.parents[4] / 'build' / pkg.name / pkg.name
+            pkg_lib_path = pathlib.Path(FindPackagePrefix(pkg.name).find(pkg.name)) / 'lib'
+            egg_link = list(pkg_lib_path.glob('**/site-packages/*egg-link'))
             import_depends = set()
-            for file in python_sources.glob('**/*.py'):
-                with open(file) as f:
-                    text = f.read()
-                    a = ast.parse(text)
-                    for line in a.body:
-                        if isinstance(line, (ast.Import, ast.ImportFrom)):
-                            if isinstance(line, ast.Import):
-                                package = line.names[0].name
-                            else:
-                                package = line.module.split('.')[0]
-                            try:
-                                FindPackageShare(package).find(package)
-                                import_depends.add(package)
-                            except Exception:
-                                if self.resolve_python_package('python3-' + package):
-                                    import_depends.add('python3-' + package)
-                                if self.resolve_python_package(package + '-pip'):
-                                    import_depends.add(package+ '-pip')
-
-            setup_py = pkg_path.parents[4] / 'build' / pkg.name / 'setup.py'
             setup_py_depends = set()
-            if setup_py.exists():
-                with open(setup_py) as f:
-                    text = f.read()
-                    a = ast.parse(text)
-                    for line in a.body:
-                        if hasattr(line, 'value') and isinstance(line.value, ast.Call) and \
-                            line.value.func.id == 'setup':
-                            for keyword in line.value.keywords:
-                                if keyword.arg == 'install_requires':
-                                    for value in keyword.value.elts:
-                                        if self.resolve_python_package('python3-' + value.s):
-                                            setup_py_depends.add('python3-' + value.s)
-                                        if self.resolve_python_package(value.s + '-pip'):
-                                            setup_py_depends.add(value.s + '-pip')
+            if egg_link:
+                with open(egg_link[0]) as f:
+                    python_sources = pathlib.Path(f.read().split('\n')[0]) / pkg.name
+                for file in python_sources.glob('**/*.py'):
+                    with open(file) as f:
+                        text = f.read()
+                        a = ast.parse(text)
+                        for line in a.body:
+                            if isinstance(line, (ast.Import, ast.ImportFrom)):
+                                if isinstance(line, ast.Import):
+                                    package = line.names[0].name
+                                else:
+                                    package = line.module.split('.')[0]
+                                try:
+                                    FindPackageShare(package).find(package)
+                                    import_depends.add(package)
+                                except Exception:
+                                    if self.resolve_python_package('python3-' + package):
+                                        import_depends.add('python3-' + package)
+                                    if self.resolve_python_package(package + '-pip'):
+                                        import_depends.add(package + '-pip')
+
+                setup_py = python_sources.parent / 'setup.py'
+                if setup_py.exists():
+                    with open(setup_py) as f:
+                        text = f.read()
+                        a = ast.parse(text)
+                        for line in a.body:
+                            if hasattr(line, 'value') and isinstance(line.value, ast.Call) and \
+                                    line.value.func.id == 'setup':
+                                for keyword in line.value.keywords:
+                                    if keyword.arg == 'install_requires':
+                                        for value in keyword.value.elts:
+                                            if self.resolve_python_package('python3-' + value.s):
+                                                setup_py_depends.add('python3-' + value.s)
+                                            if self.resolve_python_package(value.s + '-pip'):
+                                                setup_py_depends.add(value.s + '-pip')
 
             detected = exec_depends | import_depends | setup_py_depends
             missing = detected - described_exec_depends - described_depends - set([pkg.name])
