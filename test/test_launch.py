@@ -22,41 +22,41 @@ from colcon_lint.verb.lint_depends import LintVerb
 
 def test_node() -> None:
     linter = LintVerb()
-    deps = linter.resolve_depends(pathlib.Path(__file__).parent / 'node.launch.py')
+    deps = linter.resolve_launch_depends(pathlib.Path(__file__).parent / 'node.launch.py')
     assert deps == set(['test_node'])
 
 
 def test_composable_node() -> None:
     linter = LintVerb()
-    deps = linter.resolve_depends(pathlib.Path(__file__).parent / 'composable_node.launch.py')
+    deps = linter.resolve_launch_depends(pathlib.Path(__file__).parent / 'composable_node.launch.py')
     assert deps == set(['test_composable_node1', 'test_composable_node2'])
 
 
 def test_group_action() -> None:
     linter = LintVerb()
-    deps = linter.resolve_depends(pathlib.Path(__file__).parent / 'group_action.launch.py')
+    deps = linter.resolve_launch_depends(pathlib.Path(__file__).parent / 'group_action.launch.py')
     assert deps == set(['test_group1', 'test_group2'])
 
 
 def test_include() -> None:
     linter = LintVerb()
-    deps = linter.resolve_depends(pathlib.Path(__file__).parent / 'include.launch.py')
+    deps = linter.resolve_launch_depends(pathlib.Path(__file__).parent / 'include.launch.py')
     assert deps == set(['test_include'])
 
 
 def test_arg() -> None:
     linter = LintVerb()
-    deps = linter.resolve_depends(pathlib.Path(__file__).parent / 'arg.launch.py')
+    deps = linter.resolve_launch_depends(pathlib.Path(__file__).parent / 'arg.launch.py')
     assert deps == set(['test_arg'])
 
 
 def test_opaque() -> None:
     linter = LintVerb()
-    deps = linter.resolve_depends(pathlib.Path(__file__).parent / 'opaque.launch.py')
+    deps = linter.resolve_launch_depends(pathlib.Path(__file__).parent / 'opaque.launch.py')
     assert deps == set(['test_opaque'])
 
 
 def test_event_handler() -> None:
     linter = LintVerb()
-    deps = linter.resolve_depends(pathlib.Path(__file__).parent / 'event_handler.launch.py')
+    deps = linter.resolve_launch_depends(pathlib.Path(__file__).parent / 'event_handler.launch.py')
     assert deps == set(['test_node', 'test_on_exit'])

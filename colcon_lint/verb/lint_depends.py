@@ -65,9 +65,9 @@ class LintVerb(VerbExtensionPoint):
                 continue
             pkg = decorator.descriptor
             pkg_path = pathlib.Path(FindPackageShare(pkg.name).find(pkg.name)) / 'launch'
-            exec_depends = set()
+            launch_depends = set()
             for file in pkg_path.glob('**/*.py'):
-                exec_depends |= self.resolve_depends(file)
+                launch_depends |= self.resolve_launch_depends(file)
             tree = ElementTree.parse(pkg_path.parent / 'package.xml')
             root = tree.getroot()
             described_exec_depends = set([dep.text for dep in root.iter('exec_depend')])
@@ -81,41 +81,13 @@ class LintVerb(VerbExtensionPoint):
                 with open(egg_link[0]) as f:
                     python_sources = pathlib.Path(f.read().split('\n')[0]) / pkg.name
                 for file in python_sources.glob('**/*.py'):
-                    with open(file) as f:
-                        text = f.read()
-                        a = ast.parse(text)
-                        for line in a.body:
-                            if isinstance(line, (ast.Import, ast.ImportFrom)):
-                                if isinstance(line, ast.Import):
-                                    package = line.names[0].name
-                                else:
-                                    package = line.module.split('.')[0]
-                                try:
-                                    FindPackageShare(package).find(package)
-                                    import_depends.add(package)
-                                except Exception:
-                                    if self.resolve_python_package('python3-' + package):
-                                        import_depends.add('python3-' + package)
-                                    if self.resolve_python_package(package + '-pip'):
-                                        import_depends.add(package + '-pip')
+                    import_depends |= self.resolve_import_depends(file)
 
                 setup_py = python_sources.parent / 'setup.py'
                 if setup_py.exists():
-                    with open(setup_py) as f:
-                        text = f.read()
-                        a = ast.parse(text)
-                        for line in a.body:
-                            if hasattr(line, 'value') and isinstance(line.value, ast.Call) and \
-                                    line.value.func.id == 'setup':
-                                for keyword in line.value.keywords:
-                                    if keyword.arg == 'install_requires':
-                                        for value in keyword.value.elts:
-                                            if self.resolve_python_package('python3-' + value.s):
-                                                setup_py_depends.add('python3-' + value.s)
-                                            if self.resolve_python_package(value.s + '-pip'):
-                                                setup_py_depends.add(value.s + '-pip')
+                    setup_py_depends = self.resolve_setup_py_depends(setup_py)
 
-            detected = exec_depends | import_depends | setup_py_depends
+            detected = launch_depends | import_depends | setup_py_depends
             missing = detected - described_exec_depends - described_depends - set([pkg.name])
             unnecessary = described_exec_depends - detected
             if missing:
@@ -132,12 +104,49 @@ class LintVerb(VerbExtensionPoint):
         rosdep.wait()
         return rosdep.returncode == 0
 
-    def resolve_depends(self, path: pathlib.Path) -> set:
+    def resolve_launch_depends(self, path: pathlib.Path) -> set:
         depends = set()
         description = get_launch_description_from_python_launch_file(str(path))
         context = LaunchContext()
         for entity in description.entities:
             depends |= self.parse_entity(entity, context)
+        return depends
+
+    def resolve_import_depends(self, path: pathlib.Path) -> set:
+        depends = set()
+        with open(path) as f:
+            text = f.read()
+            a = ast.parse(text)
+            for line in a.body:
+                if isinstance(line, (ast.Import, ast.ImportFrom)):
+                    if isinstance(line, ast.Import):
+                        package = line.names[0].name
+                    else:
+                        package = line.module.split('.')[0]
+                    try:
+                        FindPackageShare(package).find(package)
+                        depends.add(package)
+                    except Exception:
+                        if self.resolve_python_package('python3-' + package):
+                            depends.add('python3-' + package)
+                        if self.resolve_python_package(package + '-pip'):
+                            depends.add(package + '-pip')
+        return depends
+
+    def resolve_setup_py_depends(self, path: pathlib.Path) -> set:
+        depends = set()
+        with open(path) as f:
+            text = f.read()
+            a = ast.parse(text)
+            for line in a.body:
+                if hasattr(line, 'value') and isinstance(line.value, ast.Call) and line.value.func.id == 'setup':
+                    for keyword in line.value.keywords:
+                        if keyword.arg == 'install_requires':
+                            for value in keyword.value.elts:
+                                if self.resolve_python_package('python3-' + value.s):
+                                    depends.add('python3-' + value.s)
+                                if self.resolve_python_package(value.s + '-pip'):
+                                    depends.add(value.s + '-pip')
         return depends
 
     def parse_entity(self, entity: LaunchDescriptionEntity, context: LaunchContext) -> set:
