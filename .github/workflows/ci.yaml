@@ -24,7 +24,7 @@ jobs:
           python3 setup.py sdist
       - name: Install
         run: |
-          python3 setup.py install
+          pip install .
       - name: Test
         run: |
           pytest-3
