@@ -15,16 +15,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v3
-        with:
-          python-version: "3.10"
+      - name: Set up pip
+        run: apt update && apt install -y python3-pip
       - name: Build
         run: |
           python3 setup.py sdist
       - name: Install
         run: |
-          pip install .
+          pip3 install .
       - name: Test
         run: |
           pytest-3
