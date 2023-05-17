@@ -25,7 +25,9 @@ jobs:
           pip3 install .
       - name: Test
         run: |
+          source /opt/ros/${ROS_DISTRO}/setup.bash
           pytest-3
+        shell: bash
       - name: Publish to PyPI
         if: startsWith(github.event.ref, 'refs/tags') || github.event_name == 'release'
         uses: pypa/gh-action-pypi-publish@v1.8.6
