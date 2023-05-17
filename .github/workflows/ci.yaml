@@ -22,6 +22,9 @@ jobs:
       - name: Build
         run: |
           python3 setup.py sdist
+      - name: Install
+        run: |
+          python3 setup.py install
       - name: Test
         run: |
           pytest-3
