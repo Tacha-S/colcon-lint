@@ -15,7 +15,6 @@
 import argparse
 import ast
 import pathlib
-import subprocess
 from xml.etree import ElementTree
 
 from colcon_core.command import CommandContext
@@ -42,6 +41,7 @@ from launch_ros.actions import Node
 from launch_ros.descriptions import ComposableNode
 from launch_ros.substitutions import FindPackagePrefix
 from launch_ros.substitutions import FindPackageShare
+from rosdep2.lookup import RosdepLookup
 
 logger = colcon_logger.getChild(__name__)
 
@@ -98,11 +98,8 @@ class LintVerb(VerbExtensionPoint):
         return rc
 
     def resolve_python_package(self, package: str) -> bool:
-        rosdep = subprocess.Popen(['rosdep', 'resolve', package],
-                                  stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE)
-        rosdep.wait()
-        return rosdep.returncode == 0
+        lookup = RosdepLookup.create_from_rospkg()
+        return len(lookup.get_views_that_define(package)) > 0
 
     def resolve_launch_depends(self, path: pathlib.Path) -> set:
         depends = set()
