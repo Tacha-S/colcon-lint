@@ -26,6 +26,7 @@ jobs:
       - name: Test
         run: |
           source /opt/ros/${ROS_DISTRO}/setup.bash
+          rosdep update
           pytest-3
         shell: bash
       - name: Publish to PyPI
