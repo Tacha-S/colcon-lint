@@ -15,6 +15,9 @@
 import argparse
 import ast
 import pathlib
+import re
+import shutil
+import subprocess
 from xml.etree import ElementTree
 
 from colcon_core.command import CommandContext
@@ -68,15 +71,16 @@ class LintVerb(VerbExtensionPoint):
             launch_depends = set()
             for file in pkg_path.glob('**/*.py'):
                 launch_depends |= self.resolve_launch_depends(file)
-            tree = ElementTree.parse(pkg_path.parent / 'package.xml')
-            root = tree.getroot()
-            described_exec_depends = set([dep.text for dep in root.iter('exec_depend')])
-            described_depends = set([dep.text for dep in root.iter('depend')])
 
             pkg_lib_path = pathlib.Path(FindPackagePrefix(pkg.name).find(pkg.name)) / 'lib'
             egg_link = list(pkg_lib_path.glob('**/site-packages/*egg-link'))
             import_depends = set()
             setup_py_depends = set()
+            build_depends = set()
+            build_export_depends = set()
+            buildtool_depends = set()
+            test_depends = set()
+            pkg_build_path = pkg_path.parents[4] / 'build' / pkg.name
             if egg_link:
                 with open(egg_link[0]) as f:
                     python_sources = pathlib.Path(f.read().split('\n')[0]) / pkg.name
@@ -86,15 +90,75 @@ class LintVerb(VerbExtensionPoint):
                 setup_py = python_sources.parent / 'setup.py'
                 if setup_py.exists():
                     setup_py_depends = self.resolve_setup_py_depends(setup_py)
+            elif (pkg_build_path / 'Makefile').exists():
+                trace_file = pkg_build_path / 'trace.log'
+                if trace_file.exists():
+                    with open(trace_file) as f:
+                        trace_log = f.readlines()
+                else:
+                    with open(pkg_build_path / 'Makefile') as f:
+                        for line in f.readlines():
+                            if line.startswith('CMAKE_SOURCE_DIR'):
+                                src_dir = pathlib.Path(line.split('=')[1].strip())
+                                break
+                    tmp_dir = pathlib.Path('/tmp/colcon-lint')
+                    tmp_dir.mkdir(exist_ok=True)
+                    subprocess.Popen(['cmake',
+                                      '-Wno-dev',
+                                      '--trace-expand',
+                                      '--trace-redirect=trace.log',
+                                      src_dir],
+                                     cwd=tmp_dir,
+                                     stdout=subprocess.PIPE,
+                                     stderr=None).wait()
+                    trace_file = tmp_dir / 'trace.log'
+                    with open(trace_file) as f:
+                        trace_log = f.readlines()
+                    shutil.rmtree(tmp_dir)
+                cmake_depends = self.resolve_cmake_depends(trace_log)
+                build_depends |= cmake_depends[0]
+                build_export_depends |= cmake_depends[1]
+                buildtool_depends |= cmake_depends[2]
+                test_depends |= cmake_depends[3]
 
-            detected = launch_depends | import_depends | setup_py_depends
-            missing = detected - described_exec_depends - described_depends - set([pkg.name])
-            unnecessary = described_exec_depends - detected
-            if missing:
-                logger.warn(f'[{pkg.name}] missing packages: {missing}')
+            exec_depends = launch_depends | import_depends | setup_py_depends
+            depends = (build_depends & exec_depends) | (test_depends & exec_depends)
+            exec_depends -= depends
+            build_depends -= depends
+            build_export_depends -= depends
+            test_depends -= depends
+
+            tree = ElementTree.parse(pkg_path.parent / 'package.xml')
+            root = tree.getroot()
+            described_buildtool_depends = set([dep.text for dep in root.iter('buildtool_depend')])
+            described_build_depends = set([dep.text for dep in root.iter('build_depend')])
+            described_build_export_depends = set([dep.text for dep in root.iter('build_export_depend')])
+            described_test_depends = set([dep.text for dep in root.iter('test_depend')])
+            described_exec_depends = set([dep.text for dep in root.iter('exec_depend')])
+            described_depends = set([dep.text for dep in root.iter('depend')])
+            for dep in buildtool_depends - described_depends - described_buildtool_depends - set([pkg.name]):
+                logger.warn(f'[{pkg.name}] {dep} should add to buildtool_depend.')
                 rc = 1
-            if unnecessary:
-                logger.warn(f'[{pkg.name}] unnecessary packages: {unnecessary}')
+            for dep in build_depends - described_depends - described_build_depends - set([pkg.name]):
+                logger.warn(f'[{pkg.name}] {dep} should add to build_depend.')
+                rc = 1
+            for dep in build_export_depends - described_depends - described_build_export_depends - set([pkg.name]):
+                logger.warn(f'[{pkg.name}] {dep} should add to build_export_depend.')
+                rc = 1
+            for dep in test_depends - described_depends - described_test_depends - set([pkg.name]):
+                logger.warn(f'[{pkg.name}] {dep} should add to test_depend.')
+                rc = 1
+            for dep in exec_depends - described_depends - described_exec_depends - set([pkg.name]):
+                logger.warn(f'[{pkg.name}] {dep} should add to exec_depend.')
+                rc = 1
+            for dep in depends - described_depends - \
+                    (described_build_depends & described_exec_depends) - set([pkg.name]):
+                logger.warn(f'[{pkg.name}] {dep} should add to depend.')
+                rc = 1
+            described = described_depends | described_buildtool_depends | described_build_depends | described_build_export_depends | described_test_depends | described_exec_depends
+            for dep in described - depends - buildtool_depends - \
+                    build_depends - build_export_depends - test_depends - exec_depends - set([pkg.name]):
+                logger.warn(f'[{pkg.name}] {dep} cannot be resolved.')
         return rc
 
     def resolve_python_package(self, package: str) -> bool:
@@ -145,6 +209,45 @@ class LintVerb(VerbExtensionPoint):
                                 if self.resolve_python_package(value.s + '-pip'):
                                     depends.add(value.s + '-pip')
         return depends
+
+    def resolve_cmake_depends(self, trace_log: list[str]) -> tuple[set, set, set, set]:
+        build_depends = set()
+        build_export_depends = set()
+        buildtool_depends = set()
+        test_depends = set()
+        is_test = False
+        for line in trace_log:
+            if 'CMakeLists.txt' in line and 'if(BUILD_TESTING )' in line:
+                is_test = True
+            if ('CMakeLists.txt' in line or 'ament_auto_package' in line) and 'ament_export_dependencies' in line:
+                match = re.match(r'.*ament\_export\_dependencies\((.+)\)', line)
+                if match:
+                    for dep in match.group(1).split(';'):
+                        try:
+                            FindPackageShare(dep).find(dep)
+                            build_export_depends.add(dep)
+                        except Exception:
+                            pass
+                continue
+            if 'find_package' not in line:
+                continue
+            if 'CMakeLists.txt' in line or 'ament_auto_find_build_dependencies' in line or 'ament_lint_auto_find_test_dependencies' in line:
+                match = re.match(r'.*find\_package\((.+)\)', line)
+                if not match:
+                    continue
+                dep = match.group(1).split()[0]
+                if dep in ['ament_cmake', 'ament_cmake_auto']:
+                    buildtool_depends.add(dep)
+                    continue
+                try:
+                    FindPackageShare(dep).find(dep)
+                    if is_test:
+                        test_depends.add(dep)
+                    else:
+                        build_depends.add(dep)
+                except Exception:
+                    pass
+        return build_depends, build_export_depends, buildtool_depends, test_depends
 
     def parse_entity(self, entity: LaunchDescriptionEntity, context: LaunchContext) -> set:
         depends = set()
