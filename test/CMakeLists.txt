@@ -28,11 +28,7 @@ if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
 endif()
 
-set(DEPS
-    rclcpp
-    std_msgs
-    tf2
-)
+set(DEPS rclcpp std_msgs)
 
 ament_export_dependencies(${DEPS})
 

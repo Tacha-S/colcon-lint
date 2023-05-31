@@ -28,16 +28,19 @@ def test_cmake() -> None:
     tmp_dir = pathlib.Path('/tmp/colcon-lint')
     tmp_dir.mkdir(exist_ok=True)
     subprocess.Popen(['cmake',
-                        '-Wno-dev',
-                        '--trace-expand',
-                        '--trace-redirect=trace.log',
-                        pathlib.Path(__file__).parent],
-                        cwd=tmp_dir,
-                        stdout=subprocess.PIPE,
-                        stderr=None).wait()
+                      '-Wno-dev',
+                      '--trace-expand',
+                      '--trace-redirect=trace.log',
+                      pathlib.Path(__file__).parent],
+                     cwd=tmp_dir,
+                     stdout=subprocess.PIPE,
+                     stderr=None).wait()
     trace_file = tmp_dir / 'trace.log'
     with open(trace_file) as f:
         trace_log = f.readlines()
     shutil.rmtree(tmp_dir)
     deps = linter.resolve_cmake_depends(trace_log)
-    assert deps == (set(['geometry_msgs', 'rclcpp', 'std_msgs']), set(['rclcpp', 'std_msgs', 'tf2']), set(['ament_cmake']), set(['ament_lint_auto']))
+    assert deps == (set(['geometry_msgs', 'rclcpp', 'std_msgs']),
+                    set(['rclcpp', 'std_msgs']),
+                    set(['ament_cmake']),
+                    set(['ament_lint_auto']))
