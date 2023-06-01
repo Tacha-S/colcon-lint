@@ -223,6 +223,7 @@ class LintVerb(VerbExtensionPoint):
                 match = re.match(r'.*ament\_export\_dependencies\((.+)\)', line)
                 if match:
                     for dep in match.group(1).split(';'):
+                        dep = dep.strip()
                         try:
                             FindPackageShare(dep).find(dep)
                             build_export_depends.add(dep)
