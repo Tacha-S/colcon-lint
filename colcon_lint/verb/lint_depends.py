@@ -155,7 +155,8 @@ class LintVerb(VerbExtensionPoint):
                     (described_build_depends & described_exec_depends) - set([pkg.name]):
                 logger.warn(f'[{pkg.name}] {dep} should add to depend.')
                 rc = 1
-            described = described_depends | described_buildtool_depends | described_build_depends | described_build_export_depends | described_test_depends | described_exec_depends
+            described = described_depends | described_buildtool_depends | described_build_depends | \
+                described_build_export_depends | described_test_depends | described_exec_depends
             for dep in described - depends - buildtool_depends - \
                     build_depends - build_export_depends - test_depends - exec_depends - set([pkg.name]):
                 logger.warn(f'[{pkg.name}] {dep} cannot be resolved.')
@@ -232,7 +233,8 @@ class LintVerb(VerbExtensionPoint):
                 continue
             if 'find_package' not in line:
                 continue
-            if 'CMakeLists.txt' in line or 'ament_auto_find_build_dependencies' in line or 'ament_lint_auto_find_test_dependencies' in line:
+            if 'CMakeLists.txt' in line or 'ament_auto_find_build_dependencies' in line or \
+                    'ament_lint_auto_find_test_dependencies' in line:
                 match = re.match(r'.*find\_package\((.+)\)', line)
                 if not match:
                     continue
