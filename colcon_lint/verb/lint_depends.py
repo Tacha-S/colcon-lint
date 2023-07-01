@@ -73,7 +73,7 @@ class LintVerb(VerbExtensionPoint):
                 launch_depends |= self.resolve_launch_depends(file)
 
             pkg_lib_path = pathlib.Path(FindPackagePrefix(pkg.name).find(pkg.name)) / 'lib'
-            egg_link = list(pkg_lib_path.glob('**/site-packages/*egg-link'))
+            site_packages_path = list(pkg_lib_path.glob('**/site-packages'))
             import_depends = set()
             setup_py_depends = set()
             build_depends = set()
@@ -81,15 +81,24 @@ class LintVerb(VerbExtensionPoint):
             buildtool_depends = set()
             test_depends = set()
             pkg_build_path = pkg_path.parents[4] / 'build' / pkg.name
-            if egg_link:
-                with open(egg_link[0]) as f:
-                    python_sources = pathlib.Path(f.read().split('\n')[0]) / pkg.name
-                for file in python_sources.glob('**/*.py'):
-                    import_depends |= self.resolve_import_depends(file)
+            if site_packages_path:
+                egg_link = list(site_packages_path[0].glob('*egg-link'))
+                if egg_link:
+                    with open(egg_link[0]) as f:
+                        python_sources = pathlib.Path(f.read().split('\n')[0]) / pkg.name
+                    for file in python_sources.glob('**/*.py'):
+                        import_depends |= self.resolve_import_depends(file)
 
-                setup_py = python_sources.parent / 'setup.py'
-                if setup_py.exists():
-                    setup_py_depends = self.resolve_setup_py_depends(setup_py)
+                    setup_py = python_sources.parent / 'setup.py'
+                    if setup_py.exists():
+                        setup_py_depends = self.resolve_setup_py_depends(setup_py)
+                else:
+                    for file in site_packages_path[0].glob('**/*.py'):
+                        import_depends |= self.resolve_import_depends(file)
+
+                    setup_py = pkg_build_path / 'setup.py'
+                    if setup_py.exists():
+                        setup_py_depends = self.resolve_setup_py_depends(setup_py)
             elif (pkg_build_path / 'Makefile').exists():
                 trace_file = pkg_build_path / 'trace.log'
                 if trace_file.exists():
