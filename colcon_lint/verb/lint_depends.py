@@ -14,6 +14,7 @@
 
 import argparse
 import ast
+import os
 import pathlib
 import re
 import shutil
@@ -145,31 +146,65 @@ class LintVerb(VerbExtensionPoint):
             described_test_depends = set([dep.text for dep in root.iter('test_depend')])
             described_exec_depends = set([dep.text for dep in root.iter('exec_depend')])
             described_depends = set([dep.text for dep in root.iter('depend')])
-            for dep in buildtool_depends - described_depends - described_buildtool_depends - set([pkg.name]):
+            apt_depends = self.list_up_apt_depends(described_depends)
+            apt_buildtool_depends = self.list_up_apt_depends(described_buildtool_depends)
+            apt_build_depends = self.list_up_apt_depends(described_build_depends)
+            apt_build_export_depends = self.list_up_apt_depends(described_build_export_depends)
+            apt_test_depends = self.list_up_apt_depends(described_test_depends)
+            apt_exec_depends = self.list_up_apt_depends(described_exec_depends)
+            for dep in buildtool_depends - described_depends - described_buildtool_depends \
+                    - apt_depends - apt_buildtool_depends - set([pkg.name]):
                 logger.warn(f'[{pkg.name}] {dep} should add to buildtool_depend.')
                 rc = 1
-            for dep in build_depends - described_depends - described_build_depends - set([pkg.name]):
+            for dep in build_depends - described_depends - described_build_depends \
+                    - apt_depends - apt_build_depends - set([pkg.name]):
                 logger.warn(f'[{pkg.name}] {dep} should add to build_depend.')
                 rc = 1
-            for dep in build_export_depends - described_depends - described_build_export_depends - set([pkg.name]):
+            for dep in build_export_depends - described_depends - described_build_export_depends \
+                    - apt_depends - apt_build_export_depends - set([pkg.name]):
                 logger.warn(f'[{pkg.name}] {dep} should add to build_export_depend.')
                 rc = 1
-            for dep in test_depends - described_depends - described_test_depends - set([pkg.name]):
+            for dep in test_depends - described_depends - described_test_depends \
+                    - apt_depends - apt_test_depends - set([pkg.name]):
                 logger.warn(f'[{pkg.name}] {dep} should add to test_depend.')
                 rc = 1
-            for dep in exec_depends - described_depends - described_exec_depends - set([pkg.name]):
+            for dep in exec_depends - described_depends - described_exec_depends \
+                    - apt_depends - apt_exec_depends - set([pkg.name]):
                 logger.warn(f'[{pkg.name}] {dep} should add to exec_depend.')
                 rc = 1
             for dep in depends - described_depends - \
-                    (described_build_depends & described_exec_depends) - set([pkg.name]):
+                    (described_build_depends & described_exec_depends) - apt_depends - set([pkg.name]):
                 logger.warn(f'[{pkg.name}] {dep} should add to depend.')
                 rc = 1
             described = described_depends | described_buildtool_depends | described_build_depends | \
                 described_build_export_depends | described_test_depends | described_exec_depends
-            for dep in described - depends - buildtool_depends - \
-                    build_depends - build_export_depends - test_depends - exec_depends - set([pkg.name]):
-                logger.warn(f'[{pkg.name}] {dep} cannot be resolved.')
+            implicitly = described - depends - buildtool_depends - \
+                build_depends - build_export_depends - test_depends - exec_depends - set([pkg.name])
+            if implicitly:
+                logger.info(
+                    f'[{pkg.name}] {implicitly} are not included in the explicit dependencies. It may not be necessary.'
+                )
         return rc
+
+    def list_up_apt_depends(self, packages: set[str]) -> set[str]:
+        result = subprocess.run(["rosdep", "resolve"] + list(packages), capture_output=True, text=True)
+        if result.returncode != 0:
+            return set()
+        pattern = re.compile("#apt\n([^\\s]+)\n")
+        resolved = pattern.findall(result.stdout)
+        result2 = subprocess.run(
+            ["apt-rdepends", "-p", "--follow=Depends,PreDepends,Recommends", "--show=Depends,PreDepends,Recommends"]
+            + resolved,
+            capture_output=True,
+            text=True)
+        if result2.returncode != 0:
+            return set()
+
+        pattern = re.compile("\n([^\\s]+)\n")
+        return set([
+            name.removeprefix(f'ros-{os.getenv("ROS_DISTRO")}-').replace('-', '_')
+            if name.startswith(f'ros-{os.getenv("ROS_DISTRO")}-') else name for name in pattern.findall(result2.stdout)
+        ])
 
     def resolve_python_package(self, package: str) -> bool:
         lookup = RosdepLookup.create_from_rospkg()
