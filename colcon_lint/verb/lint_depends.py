@@ -57,11 +57,13 @@ class LintVerb(VerbExtensionPoint):
     def add_arguments(self, *, parser: argparse.ArgumentParser) -> None:
         add_packages_arguments(parser)
         add_log_level_argument(parser)
+        parser.add_argument('--quick', action='store_true', help='quick check', default=False, required=False)
 
     def main(self, *, context: CommandContext) -> int:
         descriptors = get_package_descriptors(context.args, additional_argument_names=['*'])
         decorators = topological_order_packages(descriptors, recursive_categories=('run', ))
         select_package_decorators(context.args, decorators)
+        self.quick_check = context.args.quick
 
         rc = 0
         for decorator in decorators:
@@ -146,12 +148,19 @@ class LintVerb(VerbExtensionPoint):
             described_test_depends = set([dep.text for dep in root.iter('test_depend')])
             described_exec_depends = set([dep.text for dep in root.iter('exec_depend')])
             described_depends = set([dep.text for dep in root.iter('depend')])
-            apt_depends = self.list_up_apt_depends(described_depends)
-            apt_buildtool_depends = self.list_up_apt_depends(described_buildtool_depends)
-            apt_build_depends = self.list_up_apt_depends(described_build_depends)
-            apt_build_export_depends = self.list_up_apt_depends(described_build_export_depends)
-            apt_test_depends = self.list_up_apt_depends(described_test_depends)
-            apt_exec_depends = self.list_up_apt_depends(described_exec_depends)
+            apt_depends = set()
+            apt_buildtool_depends = set()
+            apt_build_depends = set()
+            apt_build_export_depends = set()
+            apt_test_depends = set()
+            apt_exec_depends = set()
+            if self.quick_check:
+                apt_depends = self.list_up_apt_depends(described_depends)
+                apt_buildtool_depends = self.list_up_apt_depends(described_buildtool_depends)
+                apt_build_depends = self.list_up_apt_depends(described_build_depends)
+                apt_build_export_depends = self.list_up_apt_depends(described_build_export_depends)
+                apt_test_depends = self.list_up_apt_depends(described_test_depends)
+                apt_exec_depends = self.list_up_apt_depends(described_exec_depends)
             for dep in buildtool_depends - described_depends - described_buildtool_depends \
                     - apt_depends - apt_buildtool_depends - set([pkg.name]):
                 logger.warn(f'[{pkg.name}] {dep} should add to buildtool_depend.')
@@ -187,6 +196,9 @@ class LintVerb(VerbExtensionPoint):
         return rc
 
     def list_up_apt_depends(self, packages: set[str]) -> set[str]:
+        if shutil.which('apt-rdepends') is None:
+            logger.warn('apt-rdepends is not installed.')
+            return set()
         result = subprocess.run(["rosdep", "resolve"] + list(packages), capture_output=True, text=True)
         if result.returncode != 0:
             return set()
